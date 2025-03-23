@@ -13,7 +13,7 @@ class CustomDataset(Dataset):
         self.enc = tiktoken.get_encoding("cl100k_base")
 
     def __len__(self):
-        return int(len(self.entries) / 10)
+        return 20 #nt(len(self.entries) / 10)
 
     def __getitem__(self, idx):
         text = self.entries.loc[idx, 'Generation']
@@ -23,17 +23,22 @@ class CustomDataset(Dataset):
         outputTensor = self.labelToTensor(label)
         return inputTensor, outputTensor
     
+    def inputTensorLength(self):
+        return 10
+    
     def wordToTensor(self, text):
         inputTokens = self.enc.encode(text)
 
         # create a input for each token
-        numInputNodes = self.enc.max_token_value
-        inputTensor = torch.zeros(numInputNodes)
+        inputTensor = torch.zeros(self.inputTensorLength())
 
-        numOfInputTokens = len(inputTokens)
-        for inputToken in inputTokens:
-            # divide by number of tokens to ensure no input node is above 1
-            inputTensor[inputToken] += (1 / numOfInputTokens)
+        for i in range(10):
+            inputTensor[i] = inputTokens[i] / self.enc.max_token_value
+
+        # numOfInputTokens = len(inputTokens)
+        # for inputToken in inputTokens:
+        #     # divide by number of tokens to ensure no input node is above 1
+        #     inputTensor[inputToken] += (1 / numOfInputTokens)
         return inputTensor
     
     def labelToTensor(self, label):
@@ -60,18 +65,15 @@ numInputNodes = tiktoken.get_encoding("cl100k_base").max_token_value
 # print(x.size())
 # exit(0)
 
-inputString = "'dead sea shrinking by 1 meter every year the indian expressa new study suggests that loss of water in gulf mexico, which is about to be fully depleted, could as much twice amount was lost during great depression.the study, published journal nature g cience, shows mexico now 2.5 meters year, or roughly inch per year.advertisement continue reading main storythe these changes have an effect on ocean circulation and level mexico.these would catastrophic ecosystems said jonathan w. jorgensen, a geologist at niversity north carolina chapel hill co-author. this global warming are not bad thing. letter sign p story please verify you're robot clicking box. invalid email address. re-enter. you must select newsletter subscribe to. will receive emails containing news content, updates promotions from york times. may opt-out any time. agree occasional special offers for times's products services. thank subscribing. error has occurred. try again later. view all times newsletters.the researchers say if gulf's decline, it major event history planet.this very big fish, dr. james a. mcilroy, british geological survey. one most significant events planet.the important places planet fossil fuel industry, well its'"
+inputString = "related. as the 15th lok sabha launched its first session today,prominent faces of previous house +0097 sonia gandhi,pranab mukherjee and l k advani were ensconced in their old seats with prime minister manmohan singh too same place. occupants rest numbers up,the congress swamped second block,pushing allies to third. rahul gandhi stayed put at a rear bench but that did not deter members from trying get closer him. lalu prasad yadav,a leading light last government,sat away congress,with his new friend mulayam yadav. flock routed ousted,lalu was no longer usual vocal self. if console him after keeping out dispensation,sonia thumped desk extra enthusiasm when he stood up take oath. taking cue,congress cheered loudly,but it failed lift lalu's spirits. singh,his sp contingent reduced nearly half,looked forlorn. third partner,ram vilas paswan,was missing,having been defeated polls. ram sunder das,89,of jd( ),who had ljp chief,sat behind party president sharad yadav,basking glory success bihar. anyone matched +0092 s wry smiles while shaking hands members,it basudeb acharia. bulk cpi(m) polls,acharia seemed have lost track scattered brood. language oath became political statement. chaste hindi for gandhi,sushma swaraj opted sanskrit. parliamentary affairs pawan kumar bansal chose punjabi,prompting ask later this indicated an impending merger chandigarh (his seat) punjab."
 enc = tiktoken.get_encoding("cl100k_base")
 inputTokens = enc.encode(inputString)
 
 # create a input for each token
-numInputNodes = enc.max_token_value
-inputTensor = torch.zeros(numInputNodes)
+inputTensor = torch.zeros(training_dataset.inputTensorLength())
 
-numOfInputTokens = len(inputTokens)
-for inputToken in inputTokens:
-    # divide by number of tokens to ensure no input node is above 1
-    inputTensor[inputToken] += (1 / numOfInputTokens)
+for i in range(10):
+    inputTensor[i] = inputTokens[i] / enc.max_token_value
 
 device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
 print(f"Using {device} device")
@@ -93,11 +95,12 @@ class NeuralNetwork(nn.Module):
         logits = self.linear_relu_stack(x)
         return logits
 
-model = NeuralNetwork(numInputNodes).to(device)
+inputTensorLength = training_dataset.inputTensorLength()
+model = NeuralNetwork(inputTensorLength).to(device)
 print(model)
 
 loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
 def train(dataloader, model, loss_fn, optimizer):
     size = len(dataloader.dataset)
@@ -133,20 +136,22 @@ def test(dataloader, model, loss_fn):
     correct /= size
     print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
 
-epochs = 1
+def verify(model, inputTensor):
+    with torch.no_grad():
+        inputTensor = inputTensor.to(device)
+        outputTensor = model(inputTensor)
+        predictionTensor : torch.Tensor = outputTensor.softmax(dim=0)
+        predictionTensor = predictionTensor.cpu()
+        predictions = predictionTensor.numpy()
+        print(f"chance it was written by a human: {predictions[0]}")
+
+epochs = 20
 for t in range(epochs):
     print(f"Epoch {t+1}\n-------------------------------")
     train(train_dataloader, model, loss_fn, optimizer)
     test(test_dataloader, model, loss_fn)
+    verify(model, inputTensor)
 print("Done!")
 
-# torch.save(model.state_dict(), "model.pth")
-# print("Saved PyTorch Model State to model.pth")
-
-with torch.no_grad():
-    inputTensor = inputTensor.to(device)
-    outputTensor = model(inputTensor)
-    predictionTensor : torch.Tensor = outputTensor.softmax(dim=0)
-    predictionTensor = predictionTensor.cpu()
-    predictions = predictionTensor.numpy()
-    print(f"chance it was written by a human: {predictions[0]}")
+torch.save(model.state_dict(), "model.pth")
+print("Saved PyTorch Model State to model.pth")
